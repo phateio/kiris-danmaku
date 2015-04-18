@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex,nofollow">
+<script src="//code.jquery.com/jquery-latest.min.js"></script>
+<title>Danmaku Test Page</title>
+</head>
+<body>
+<table>
+<tr><td>Step1.</td><td><button id="hook" type="button">Hook</button></td></tr>
+<tr><td>Step2.</td><td><div id="danmakubar"><form><input type="text"></form></div></td></tr>
+</table>
+<script type="text/javascript">
+  var last_id = 0;
+  $(document).on('click', '#hook', function(event) {
+    $self = $(event.currentTarget)
+    $self.attr('disabled', 'disabled').text('Hooking . . .');
+    var ajax = $.ajax({
+      url: '/poll',
+      dataType: 'jsonp',
+      global: false,
+      data: {
+        last_id: last_id
+      },
+      success: function(items, textStatus, jqXHR) {
+        var data, item, timestamp, _i, _len;
+        console.log(items);
+        data = items.data;
+        if (data.length) {
+          timestamp = data[0].timestamp;
+          for (_i = 0, _len = data.length; _i < _len; _i++) {
+            item = data[_i];
+            console.log('Danmaku: Received: ' + item.text);
+            last_id = item.id;
+          }
+        }
+      },
+      error: function(jqXHR, textStatus) {
+        console.log(textStatus);
+      },
+      complete: function() {
+        $self.text('Hook').removeAttr('disabled');
+      }
+    });
+  });
+
+  $(document).on('submit', '#danmakubar form', function(event) {
+    event.preventDefault()
+    $danmakuinput = $('#danmakubar form>input')
+    text = $.trim($danmakuinput.val())
+    $danmakuinput.val('').trigger('blur')
+
+    result = $.ajax({
+      url: '/post',
+      dataType: 'jsonp',
+      data: {
+        text: text
+      },
+      success: function(items, textStatus, jqXHR) {
+        console.log(items);
+      },
+      error: function(jqXHR, textStatus) {
+        console.log(textStatus);
+      }
+    });
+  });
+</script>
+</body>
+</html>
