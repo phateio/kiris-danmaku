@@ -202,7 +202,7 @@ class nodeIRC
           fragdata = danmaku.fragtable[target]
           uid = if fragdata then get_ip_with_tripcode(fragdata.ip) else null
           if uid
-            danmaku.ban(uid, nick, null, null)
+            danmaku.ban(uid, nick, 'IRC Report', null)
           else if target
             self.client.say(self.chanName, "IP address '#{target}' not found.")
           else
@@ -255,16 +255,16 @@ class nodeIRC
         when 'ban'
           target = param1
           duration = parseInt(param2) || null
-          danmaku.ban(target, nick, null, duration)
+          danmaku.ban(target, nick, 'IRC Command', duration)
           return
         when 'unban'
           target = param1
           danmaku.unban(target, nick)
           return
         when 'say'
-          size = parseInt(param1) || null
-          message = param2
-          danmaku.say(message, size)
+          message = if param2 then "#{param1} #{param2}" else param1
+          danmaku.say message, '127.0.0.1',
+            color: '0,255,0,0.9'
           return
         when 'mute'
           danmaku.mute = true
@@ -346,7 +346,8 @@ class Danmaku
 
     self.dbUser = process.env.OPENSHIFT_MONGODB_DB_USERNAME
     self.dbPass = process.env.OPENSHIFT_MONGODB_DB_PASSWORD
-    self.dbName = 'nodedanmaku'
+    self.dbMessageName = 'messages'
+    self.dbConfigName = 'configurations'
     self.emitter = new emitter()
 
   setupVariables: =>
@@ -404,12 +405,12 @@ class Danmaku
     self.db.open (err, db) ->
       throw err if err
       if $DEBUG
-        self.db.collection(self.dbName).remove()
+        self.db.collection(self.dbMessageName).remove()
         callback()
       else
         self.db.authenticate self.dbUser, self.dbPass, (err, res) ->
           throw err if err
-          self.db.collection(self.dbName).remove()
+          self.db.collection(self.dbMessageName).remove()
           callback()
 
   loadStringFilter: (sensitive_word_file) =>
@@ -426,11 +427,6 @@ class Danmaku
 
   stringFilter: (text) =>
     self = this
-    if self.sensitive_words.length == 0
-      sensitive_word_files = fs.readdirSync(self.sensitive_word_file_dir)
-      for sensitive_word_file in sensitive_word_files
-        self.loadStringFilter("#{self.sensitive_word_file_dir}/#{sensitive_word_file}")
-
     safe_text = text
     for sensitive_word in self.sensitive_words
       switch sensitive_word.type
@@ -456,7 +452,7 @@ class Danmaku
 
   query: (last_id, callback) =>
     self = this
-    self.db.collection(self.dbName).find(
+    self.db.collection(self.dbMessageName).find(
       id:
         $gt: last_id
     ,
@@ -503,6 +499,29 @@ class Danmaku
       safe_referer = strip_hyper_links(strip_irc_colors(referer))
       throw "REFERRAL_DENIED: #{safe_referer}"
 
+  loadBlacklist: =>
+    self = this
+    self.db.collection(self.dbConfigName).find(
+      name: 'blacklist'
+    ).sort(id: 1).toArray (err, items) ->
+      throw err if err
+      return if items.length == 0
+      self.blacklist = JSON.parse(items[0].text)
+      DEBUG('Load %d blacklist items from database.', Object.keys(self.blacklist).length)
+
+  saveBlacklist: =>
+    self = this
+    criteria =
+      name: 'blacklist'
+    data =
+      name: 'blacklist'
+      text: JSON.stringify(self.blacklist)
+    options =
+      upsert: true
+    self.db.collection(self.dbConfigName).update criteria, data, options, (err, count, status) ->
+      throw err if err
+      DEBUG('Save blacklist to database. Returned %s', status)
+
   blacklistCheck: (ip) =>
     self = this
     uid = get_ip_with_tripcode(ip)
@@ -539,24 +558,20 @@ class Danmaku
         count: 1
     self.last_response_uid = uid
 
-  sensitive_wordCheck: (text) =>
+  ignoredWordsCheck: (text) =>
     self = this
     throw 'IGNORED' if text.indexOf("\u0000") != -1
 
-  say: (text, size = 1.0) =>
+  say: (text, address, attributes = {}, callback = false) =>
     self = this
-    ip = '127.0.0.1'
-    uid = get_ip_with_tripcode(ip)
+    uid = get_ip_with_tripcode(address)
     timestamp = (new Date()).getTime()
 
-    text = text.substr(0, 64)
-    text = self.stringFilter(text)
-
-    top = 0.1
-    color = '0,255,0,0.9'
-    size = size
-    weight = 'bold'
-    speed = 1.0
+    top = attributes.top || Math.random()
+    color = attributes.color || '255,255,255,0.9'
+    size = attributes.size || 1.0
+    weight = attributes.weight || 'bold'
+    speed = attributes.speed || 1.0
 
     item =
       id: self.last_record_id + 1
@@ -567,24 +582,45 @@ class Danmaku
       weight: weight
       speed: speed
       uid: uid
-      ip: ip
+      ip: address
       timestamp: timestamp
 
-    self.db.collection(self.dbName).insert item, (result) ->
-      DEBUG('Insert id %d (%s)', self.last_record_id, ip)
+    self.db.collection(self.dbMessageName).insert item, (result) ->
+      DEBUG('Insert id %d (%s)', self.last_record_id, address)
+      callback() if callback
     self.last_record_id++
-    nodeirc.action("\u000306[#{uid}] \u000303#{text}") if not self.mute
 
-  ban: (uid, by_ = 'system', reason = 'Manual', duration = 3600) =>
+    if not self.mute
+      if self.metadata_updated
+        title = self.metadata.title
+        artist = self.metadata.artist
+        tags = self.metadata.tags
+        nodeirc.say("\u000306Now playing: \u000314#{artist} - #{title} (#{tags})")
+        self.metadata_updated = false
+      nodeirc.action("\u000306[#{uid}] \u000314#{text}")
+
+  system_say: (text) =>
     self = this
-    timestamp = (new Date()).getTime()
+    self.say text, '127.0.0.1',
+      color: '255,0,0,0.9'
+      size: 0.5
+      speed: 0.75
+
+  ban: (uid, by_, reason, duration = 3600) =>
+    self = this
+    now_time = (new Date()).getTime()
+    timestamp = if self.blacklist[uid] then self.blacklist[uid].timestamp else now_time
+    new_timestamp = timestamp + duration * 1000
     self.blacklist[uid] =
       moderator: by_
-      timestamp: timestamp + duration * 1000
-    duration_hours = parseFloat(duration / 3600)
-    nodeirc.action("\u000304#{uid} has been banned #{duration_hours} hours. (#{reason})") if not self.mute
+      timestamp: new_timestamp
+    duration_hours = parseInt((new_timestamp - now_time) / 3600 / 1000)
+    if not self.mute
+      nodeirc.action("\u000304#{uid} has been banned #{duration_hours} hours. (#{reason} by #{by_})")
+      self.system_say("#{uid} has been banned #{duration_hours} hours. (#{reason})")
+    self.saveBlacklist()
 
-  unban: (uid, by_ = 'system') =>
+  unban: (uid, by_) =>
     self = this
     delete self.blacklist[uid] if self.blacklist[uid]
     nodeirc.action("\u000303#{uid} has been unbanned.") if not self.mute
@@ -620,68 +656,28 @@ class Danmaku
       uid = get_ip_with_tripcode(ip)
       callback = params.callback
       text = params.text
-      top = params.top
-      color = params.color
-      size = params.size
-      weight = params.weight
-      speed = params.speed
 
-      loop
-        break if not text
-        text = text.substr(0, 64)
-        text = strip_hyper_links(strip_irc_colors(self.stringFilter(text)))
+      text = text.substr(0, 64)
+      text = strip_hyper_links(strip_irc_colors(self.stringFilter(text)))
 
-        top = Math.random()
-        color = '255,255,255,0.9'
-        size = 1.0
-        weight = 'bold'
-        speed = 1.0
-
-        item =
-          id: self.last_record_id + 1
-          text: text
-          top: top
-          color: color.split(',')
-          size: size
-          weight: weight
-          speed: speed
-          uid: uid
-          ip: ip
-          timestamp: timestamp
-
-        try
-          self.browserCheck(req)
-          self.blacklistCheck(ip)
-          self.fragtableCheck(address) for address in forwarded_ips
-          self.sensitive_wordCheck(text)
-          self.db.collection(self.dbName).insert item, (result) ->
-            DEBUG('Insert id %d (%s)', self.last_record_id, ip)
-            res.send(jsonp_stringify(ret, callback))
-          self.last_record_id++
-          if not self.mute
-            if self.metadata_updated
-              title = self.metadata.title
-              artist = self.metadata.artist
-              tags = self.metadata.tags
-              nodeirc.say("\u000306Now playing: \u000314#{artist} - #{title} (#{tags})")
-              self.metadata_updated = false
-            nodeirc.action("\u000306[#{uid}] \u000314#{text}")
-        catch error
-          switch error
-            when 'BLACKLIST'
-              ret.code = 418
-              ret.status = 'I\'m a teapot'
-            else
-              ret.code = 500
-              ret.status = error
-          ret.data.push(item)
-          WARN('%s (%s)', error, ip)
-          res.send(jsonp_stringify(ret, callback))
-          if not self.mute && self.last_blacklist_uid != uid
-            nodeirc.action("\u000306[#{uid}]\u000301,01 #{text} \u000304(#{error})")
-          self.last_blacklist_uid = uid
-        return
-
+      try
+        self.browserCheck(req)
+        self.blacklistCheck(ip)
+        self.fragtableCheck(address) for address in forwarded_ips
+        self.ignoredWordsCheck(text)
+        self.say(text, ip)
+      catch error
+        switch error
+          when 'BLACKLIST'
+            ret.code = 418
+            ret.status = 'I\'m a teapot'
+          else
+            ret.code = 500
+            ret.status = error
+        WARN('%s (%s)', error, ip)
+        if not self.mute && self.last_blacklist_uid != uid
+          nodeirc.action("\u000306[#{uid}]\u000301,01 #{text} \u000304(#{error})")
+        self.last_blacklist_uid = uid
       res.send(jsonp_stringify(ret, callback))
 
     self.routes['GET']['/poll'] = (req, res) ->
@@ -796,6 +792,10 @@ class Danmaku
 
   start: =>
     self = this
+    self.loadBlacklist()
+    sensitive_word_files = fs.readdirSync(self.sensitive_word_file_dir)
+    for sensitive_word_file in sensitive_word_files
+      self.loadStringFilter("#{self.sensitive_word_file_dir}/#{sensitive_word_file}")
     self.polling()
     self.app.listen self.port, self.ipaddress, ->
       INFO('Node server started on %s:%d ...', self.ipaddress, self.port)
