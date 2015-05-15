@@ -567,7 +567,7 @@ class Danmaku
     uid = get_ip_with_tripcode(address)
     timestamp = (new Date()).getTime()
 
-    top = attributes.top || Math.random()
+    top = if attributes.top == undefined then Math.random() else attributes.top
     color = attributes.color || '255,255,255,0.9'
     size = attributes.size || 1.0
     weight = attributes.weight || 'bold'
