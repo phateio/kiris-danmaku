@@ -624,6 +624,7 @@ class Danmaku
     self = this
     delete self.blacklist[uid] if self.blacklist[uid]
     nodeirc.action("\u000303#{uid} has been unbanned.") if not self.mute
+    self.saveBlacklist()
 
   createRoutes: =>
     self = this
