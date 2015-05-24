@@ -279,10 +279,14 @@ class nodeIRC
         when 'lookup'
           target = param1
           fragdata = danmaku.fragtable[target]
-          userip = if fragdata then fragdata.ip else 'unknow'
-          message = "User \u000306#{target} \u0003IP is \u000305#{userip}"
-          dns.lookup userip, null, (err, address) ->
-            message += " (#{address})" if not err
+          if fragdata
+            userip = fragdata.ip
+            message = "User \u000306#{target} \u0003IP is \u000305#{userip}"
+            dns.reverse userip, (err, hostnames) ->
+              message += " (#{hostnames.join(', ')})" if not err
+              self.client.ctcp(nick, 'notice', message)
+          else
+            message = "User \u000306#{target} \u0003IP is \u000305Unknow"
             self.client.ctcp(nick, 'notice', message)
           return
         when 'msg'
