@@ -72,6 +72,9 @@ getTimeString = (format, datetime = (new Date())) ->
         .replace('i', ('0' + Minute).substr(-2))
         .replace('s', ('0' + Second).substr(-2))
 
+object_length = (obj) ->
+  Object.keys(obj).length
+
 strip_irc_colors = (text) ->
   text.replace(/[\x02\x1f\x16\x0f]|\x03\d{0,2}(?:,\d{0,2})?/g, '')
 
@@ -202,7 +205,7 @@ class nodeIRC
           fragdata = danmaku.fragtable[target]
           uid = if fragdata then get_ip_with_tripcode(fragdata.ip) else null
           if uid
-            danmaku.ban(uid, nick, 'IRC Report', null)
+            danmaku.ban(uid, nick, 'IRC Report', 86400 * 3)
           else if target
             self.client.say(self.chanName, "IP address '#{target}' not found.")
           else
@@ -519,7 +522,7 @@ class Danmaku
       throw err if err
       return if items.length == 0
       self.blacklist = JSON.parse(items[0].text)
-      DEBUG('Load %d blacklist items from database.', Object.keys(self.blacklist).length)
+      DEBUG('Load %d blacklist items from database.', object_length(self.blacklist))
 
   saveBlacklist: =>
     self = this
@@ -568,6 +571,7 @@ class Danmaku
         ip: ip
         combo: 1
         count: 1
+        flag: {}
     self.last_response_uid = uid
 
   ignoredWordsCheck: (text) =>
@@ -611,12 +615,12 @@ class Danmaku
         self.metadata_updated = false
       nodeirc.action("\u000306[#{uid}] \u000314#{text}")
 
-  system_say: (text) =>
+  system_say: (text, attributes = {}) =>
     self = this
-    self.say text, '127.0.0.1',
-      color: '255,0,0,0.9'
-      size: 0.5
-      speed: 0.75
+    attributes.color ||= '255,0,0,0.9'
+    attributes.size ||= 0.75
+    attributes.speed ||= 0.75
+    self.say text, '127.0.0.1', attributes
 
   ban: (uid, by_, reason, duration = 3600) =>
     self = this
@@ -741,7 +745,14 @@ class Danmaku
         fragdata = self.fragtable[target_uid]
         target_uid = if fragdata then get_ip_with_tripcode(fragdata.ip) else null
         throw 'UID Not Found' if not target_uid
-        self.ban(target_uid, uid, 'Online Report', null)
+        if self.fragtable[target_uid].flag[uid]
+          nodeirc.action("\u000307#{target_uid} has been reported by #{uid})")
+        else
+          self.fragtable[target_uid].flag[uid] = 1
+          if object_length(self.fragtable[target_uid].flag) >= 2
+            self.ban(target_uid, uid, 'Online Report', 86400)
+          else
+            self.system_say("#{target_uid} is reported by #{uid}", color: '255,128,0,0.9')
       catch error
         switch error
           when 'BLACKLIST'
