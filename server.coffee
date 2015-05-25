@@ -289,6 +289,14 @@ class nodeIRC
             message = "User \u000306#{target} \u0003IP is \u000305Unknow"
             self.client.ctcp(nick, 'notice', message)
           return
+        when 'onlines'
+          fragtable = danmaku.fragtable
+          for uid, item of fragtable
+            item_json_string = JSON.stringify(item)
+            message = "\u000306#{uid} \u000313#{item_json_string}"
+            self.client.notice(nick, message)
+          self.client.ctcp(nick, 'notice', ':End of Danmaku online List')
+          return
         when 'msg'
           target = param1
           message = param2
