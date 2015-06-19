@@ -672,7 +672,7 @@ class Danmaku
       forwarded_ips = get_client_forwarded_ips(req)
       uid = get_ip_with_tripcode(ip)
       callback = params.callback
-      text = params.text
+      text = params.text || ''
 
       text = text.substr(0, 64)
       text = strip_hyper_links(strip_irc_colors(self.stringFilter(text)))
