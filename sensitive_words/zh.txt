@@ -183,8 +183,6 @@
 奸 | 煎 | explicit
 鮑 | 煲 | explicit
 妓 | 技 | explicit
-槍 | 銃 | explicit
-鎗 | 銃 | explicit
 ㄏ | 呵 | explicit
 ㄛ | 喵 | explicit
 屁 | P | explicit
