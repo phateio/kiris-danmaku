@@ -1,1 +1,0 @@
-$OPENSHIFT_REPO_DIR/node_modules/coffee-script/bin/coffee -bc $OPENSHIFT_REPO_DIR/server.coffee

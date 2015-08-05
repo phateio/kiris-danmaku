@@ -10,7 +10,7 @@ emitter    = require('events').EventEmitter
 crypto     = require('crypto')
 irc        = require('irc')
 
-$DEBUG  = not process.env.OPENSHIFT_APP_NAME
+$DEBUG  = not process.env.SHELL
 
 process.env.TZ = 'Asia/Taipei'
 
@@ -86,14 +86,18 @@ get_ip_with_tripcode = (address, masked = false) ->
   address.toString().replace /\.[0-9]+\.[0-9]+$/, '.' + if masked then '*' else tripcode
 
 get_client_remote_address = (req) ->
-  forwarded_for = req.header('X-FORWARDED-FOR')
-  forwarded_for_last = if forwarded_for then forwarded_for.split(/\s*,\s*/).last() else null
-  forwarded_for_last or req.connection.remoteAddress
+  req.header('X-Real-IP') or req.connection.remoteAddress
 
-get_client_forwarded_ips = (req) ->
+get_client_remote_addresses = (req) ->
+  real_ip_address = req.header('X-Real-IP') or req.connection.remoteAddress
   forwarded_for = req.header('X-FORWARDED-FOR')
-  forwarded_for_match = if forwarded_for then forwarded_for.split(/\s*,\s*/) else null
-  forwarded_for_match or [req.connection.remoteAddress]
+  if forwarded_for
+    forwarded_for_match = forwarded_for.split(/\s*,\s*/)
+    forwarded_for_match.shift
+    forwarded_for_match.push(real_ip_address)
+  else
+    forwarded_for_match = null
+  forwarded_for_match or [real_ip_address]
 
 jsonp_stringify = (object, callback = 'callback') ->
   callback = 'callback' if not (callback && callback.match(/^[A-Za-z0-9_\$]+$/i)?)
@@ -347,31 +351,19 @@ class Danmaku
     self.sensitive_word_file_dir = './sensitive_words'
     self.html_path = './htdocs'
 
-    if $DEBUG
-      self.dbServer = new mongodb.Server('localhost', 27017)
-      self.db = new mongodb.Db('database_demo', self.dbServer,
-        auto_reconnect: true
-      )
-    else
-      self.dbServer = new mongodb.Server(process.env.OPENSHIFT_MONGODB_DB_HOST,
-                                parseInt(process.env.OPENSHIFT_MONGODB_DB_PORT))
-      self.db = new mongodb.Db(process.env.OPENSHIFT_APP_NAME, self.dbServer,
-        auto_reconnect: true
-      )
+    self.dbServer = new mongodb.Server('localhost', 27017)
+    self.db = new mongodb.Db('nodedanmaku', self.dbServer,
+      auto_reconnect: true
+    )
 
-    self.dbUser = process.env.OPENSHIFT_MONGODB_DB_USERNAME
-    self.dbPass = process.env.OPENSHIFT_MONGODB_DB_PASSWORD
     self.dbMessageName = 'messages'
     self.dbConfigName = 'configurations'
     self.emitter = new emitter()
 
   setupVariables: =>
     self = this
-    self.ipaddress = process.env.OPENSHIFT_NODEJS_IP
-    self.port = process.env.OPENSHIFT_NODEJS_PORT or 8080
-    if typeof self.ipaddress == 'undefined'
-      WARN('No OPENSHIFT_NODEJS_IP var, using 127.0.0.1')
-      self.ipaddress = '127.0.0.1'
+    self.ipaddress = '127.0.0.1'
+    self.port = 8124
 
   populateCache: =>
     self = this
@@ -419,14 +411,8 @@ class Danmaku
     self = this
     self.db.open (err, db) ->
       throw err if err
-      if $DEBUG
-        self.db.collection(self.dbMessageName).remove()
-        callback()
-      else
-        self.db.authenticate self.dbUser, self.dbPass, (err, res) ->
-          throw err if err
-          self.db.collection(self.dbMessageName).remove()
-          callback()
+      self.db.collection(self.dbMessageName).remove()
+      callback()
 
   loadStringFilter: (sensitive_word_file) =>
     self = this
@@ -669,7 +655,7 @@ class Danmaku
       params = url.parse(req.url, true).query
       timestamp = (new Date()).getTime()
       ip = get_client_remote_address(req)
-      forwarded_ips = get_client_forwarded_ips(req)
+      addresses = get_client_remote_addresses(req)
       uid = get_ip_with_tripcode(ip)
       callback = params.callback
       text = params.text || ''
@@ -680,7 +666,7 @@ class Danmaku
       try
         self.browserCheck(req)
         self.blacklistCheck(ip)
-        self.fragtableCheck(address) for address in forwarded_ips
+        self.fragtableCheck(address) for address in addresses
         self.ignoredWordsCheck(text)
         self.say(text, ip)
       catch error
@@ -733,7 +719,7 @@ class Danmaku
       params = url.parse(req.url, true).query
       timestamp = (new Date()).getTime()
       ip = get_client_remote_address(req)
-      forwarded_ips = get_client_forwarded_ips(req)
+      addresses = get_client_remote_addresses(req)
       uid = get_ip_with_tripcode(ip)
       target_uid = params.target_uid
       callback = params.callback
@@ -741,7 +727,7 @@ class Danmaku
       try
         self.browserCheck(req)
         self.blacklistCheck(ip)
-        self.fragtableCheck(address) for address in forwarded_ips
+        self.fragtableCheck(address) for address in addresses
         fragdata = self.fragtable[target_uid]
         target_uid = if fragdata then get_ip_with_tripcode(fragdata.ip) else null
         throw 'UID Not Found' if not target_uid
