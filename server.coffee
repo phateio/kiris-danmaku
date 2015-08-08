@@ -496,7 +496,7 @@ class Danmaku
     throw 'REFERRAL_DENIED' if not referer
     domain = url.parse(referer, true).hostname
     return if $DEBUG
-    if not (domain && domain.match(/^(?:[A-Za-z0-9\-\.]+\.)?phate\.(?:io|cc|us|tw|org)$/i)?)
+    if not (domain && domain.match(/^(?:[A-Za-z0-9\-\.]+\.)?phate\.io$/i)?)
       safe_referer = strip_hyper_links(strip_irc_colors(referer))
       throw "REFERRAL_DENIED: #{safe_referer}"
 
