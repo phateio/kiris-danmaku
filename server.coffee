@@ -108,7 +108,7 @@ class nodeIRC
     self = this
     self.chanName = '#phateio'
     self.channels = if $DEBUG then [self.chanName] else ['#phatecc', self.chanName]
-    self.names = null
+    self.channel_names = {}
     self.client = new irc.Client('irc.rizon.net', 'danmaku',
       autoRejoin: true
       autoConnect: true
@@ -138,10 +138,14 @@ class nodeIRC
       self.client.ctcp(from, 'notice', 'VERSION node-irc 0.3.5')
 
     self.client.addListener '+mode', (channel, by_, mode, argument, message) ->
-      DEBUG('%s mode %s', by_, argument)
+      DEBUG('%s sets mode +%s on %s', by_, mode, argument)
+      if mode == 'o'
+        self.channel_names[channel][argument] = '@'
 
     self.client.addListener '-mode', (channel, by_, mode, argument, message) ->
-      DEBUG('%s mode %s', by_, argument)
+      DEBUG('%s sets mode -%s on %s', by_, mode, argument)
+      if mode == 'o'
+        self.channel_names[channel][argument] = ''
 
     self.client.addListener 'nick', (oldnick, newnick, channels, message) ->
       DEBUG('%s is now known as %s', oldnick, newnick)
@@ -158,8 +162,8 @@ class nodeIRC
     self.client.addListener 'kick' + self.chanName, (nick, by_, reason, message) ->
       DEBUG('%s has been kicked. %s (%s)', by_, nick, reason)
 
-    self.client.addListener 'names' + self.chanName, (nicks) ->
-      self.names = nicks
+    self.client.addListener 'names', (channel, nicks) ->
+      self.channel_names[channel] = nicks
 
     self.client.addListener 'action', (from, to, text, message) ->
       DEBUG('%s %s', from, text)
@@ -244,17 +248,17 @@ class nodeIRC
           for uid, item of blacklist
             time = getTimeString('Y-m-d H:i:s', new Date(item.timestamp))
             by_ = item.moderator
-            message = "\u000306#{uid} \u000313due \u000304#{time} \u000313by \u000303#{by_}"
-            self.client.notice(nick, message)
+            response = "\u000306#{uid} \u000313due \u000304#{time} \u000313by \u000303#{by_}"
+            self.client.notice(nick, response)
           self.client.ctcp(nick, 'notice', ':End of Danmaku Ban List')
           return
         when 'status'
           listener_count = danmaku.listener_count
-          message = "There are \u000304#{listener_count} \u0003listeners online."
-          self.client.ctcp(nick, 'notice', message)
+          response = "There are \u000304#{listener_count} \u0003listeners online."
+          self.client.ctcp(nick, 'notice', response)
           return
 
-      if self.names[nick] != '@'
+      if self.channel_names[self.chanName][nick] != '@'
         self.client.ctcp(nick, 'notice', 'Permission denied')
         return
 
