@@ -419,7 +419,7 @@ class Danmaku
       self.db.collection(self.dbMessageName).remove()
       callback()
 
-  loadStringFilter: (sensitive_word_file) =>
+  loadSensitiveWordList: (sensitive_word_file) =>
     self = this
     sensitive_word_array = fs.readFileSync(sensitive_word_file, 'utf8').split("\n")
     for sensitive_word_line in sensitive_word_array
@@ -431,7 +431,7 @@ class Danmaku
         type: sensitive_word[2].strip()
     DEBUG('Load %d sensitive words from %s', self.sensitive_words.length, sensitive_word_file)
 
-  stringFilter: (text) =>
+  replaceSensitiveWords: (text) =>
     self = this
     safe_text = text
     for sensitive_word in self.sensitive_words
@@ -474,7 +474,7 @@ class Danmaku
       timestamp = (new Date()).getTime()
       if timestamp > self.last_response_time + self.polliing_timeout
         self.last_response_time = timestamp
-        self.cleanfraglist()
+        self.expireLists()
         self.emitter.emit 'onmessage', []
         self.listener_count = 0
       return if self.last_response_id == self.last_record_id
@@ -486,7 +486,7 @@ class Danmaku
       return
     , 200)
 
-  cleanfraglist: =>
+  expireLists: =>
     self = this
     timestamp = (new Date()).getTime()
     for i of self.blacklist
@@ -675,7 +675,7 @@ class Danmaku
       text = params.text || ''
 
       text = text.substr(0, 64)
-      text = strip_hyper_links(strip_irc_colors(self.stringFilter(text)))
+      text = strip_hyper_links(strip_irc_colors(self.replaceSensitiveWords(text)))
 
       try
         self.browserCheck(req)
@@ -729,9 +729,7 @@ class Danmaku
 
     self.routes['GET']['/report'] = (req, res) ->
       res.setHeader('Content-Type', 'text/javascript; charset=utf-8')
-      ret =
-        code: 200
-        status: 'OK'
+      ret = {}
 
       params = url.parse(req.url, true).query
       timestamp = (new Date()).getTime()
@@ -759,11 +757,9 @@ class Danmaku
       catch error
         switch error
           when 'BLACKLIST'
-            ret.code = 418
-            ret.status = 'I\'m a teapot'
+            ret['message'] = 'I\'m a teapot'
           else
-            ret.code = 500
-            ret.status = error
+            ret['message'] = error
         WARN('%s (%s)', error, ip)
         if not self.mute && self.last_blacklist_uid != uid
           nodeirc.action("\u000306#{uid}\u000314 is trying to report #{target_uid} \u000304(#{error})")
@@ -778,33 +774,26 @@ class Danmaku
       res.send(JSON.stringify(ret))
 
     self.routes['POST']['/metadata'] = (req, res) ->
-      res.setHeader 'Content-Type', 'text/javascript; charset=utf-8'
-      ret =
-        code: 200
-        status: 'OK'
-        data: []
+      res.setHeader 'Content-Type', 'application/json; charset=utf-8'
+      ret = {}
 
-      params = url.parse(req.url, true).query
       ip = get_client_remote_address(req)
-      callback = params.callback
       title = req.body.title
       artist = req.body.artist
       tags = req.body.tags
       authorized = self.secret_key && self.secret_key == req.body.secret_key
 
       try
-        throw 'Permission_denied' if not authorized
+        throw 'Permission denied' if not authorized
         self.metadata =
           title: title
           artist: artist
           tags: tags
         self.metadata_updated = true
       catch error
-        ret.code = 403
-        ret.status = error
+        ret['message'] = error
         WARN('%s (%s)', error, ip)
-
-      res.send(jsonp_stringify(ret, callback))
+      res.send(JSON.stringify(ret))
 
   initializeServer: =>
     self = this
@@ -829,7 +818,7 @@ class Danmaku
     self.loadBlacklist()
     sensitive_word_files = fs.readdirSync(self.sensitive_word_file_dir)
     for sensitive_word_file in sensitive_word_files
-      self.loadStringFilter("#{self.sensitive_word_file_dir}/#{sensitive_word_file}")
+      self.loadSensitiveWordList("#{self.sensitive_word_file_dir}/#{sensitive_word_file}")
     self.polling()
     self.app.listen self.port, self.ipaddress, ->
       INFO('Node server started on %s:%d ...', self.ipaddress, self.port)
