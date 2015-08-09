@@ -253,8 +253,8 @@ class nodeIRC
           self.client.ctcp(nick, 'notice', ':End of Danmaku Ban List')
           return
         when 'status'
-          listener_count = danmaku.listener_count
-          response = "There are \u000304#{listener_count} \u0003listeners online."
+          addresses_count = object_length(danmaku.addresslist)
+          response = "There are \u000304#{addresses_count} \u0003unique IP addresses online."
           self.client.ctcp(nick, 'notice', response)
           return
 
@@ -339,6 +339,7 @@ class Danmaku
 
     self.blacklist = {}
     self.fragtable = {}
+    self.addresslist = {}
     self.sensitive_words = []
     self.last_response_uid = 0
     self.last_blacklist_uid = 0
@@ -492,6 +493,8 @@ class Danmaku
       delete self.blacklist[i] if self.blacklist[i].timestamp <= timestamp
     for i of self.fragtable
       delete self.fragtable[i] if self.fragtable[i].timestamp <= timestamp - 60 * 60 * 1000
+    for i of self.addresslist
+      delete self.addresslist[i] if self.addresslist[i].timestamp <= timestamp - 90 * 1000
 
   browserCheck: (req) =>
     self = this
@@ -563,6 +566,13 @@ class Danmaku
         count: 1
         flag: {}
     self.last_response_uid = uid
+
+  addresslistCheck: (ip) =>
+    self = this
+    timestamp = (new Date()).getTime()
+    self.addresslist[ip] = 
+      timestamp: timestamp
+      ip: ip
 
   ignoredWordsCheck: (text) =>
     self = this
@@ -695,10 +705,13 @@ class Danmaku
         data: []
 
       params = url.parse(req.url, true).query
+      timestamp = (new Date()).getTime()
+      ip = get_client_remote_address(req)
       user_last_id = parseInt(params.last_id) || parseInt(params.lastid) # Deprecated
       callback = params.callback
       if not (user_last_id && user_last_id >= self.last_record_id - self.history_limit && user_last_id <= self.last_record_id)
         user_last_id = self.last_record_id
+      self.addresslistCheck(ip)
 
       if user_last_id < self.last_record_id
         self.query user_last_id, (items) ->
@@ -756,6 +769,13 @@ class Danmaku
           nodeirc.action("\u000306#{uid}\u000314 is trying to report #{target_uid} \u000304(#{error})")
         self.last_blacklist_uid = uid
       res.send(jsonp_stringify(ret, callback))
+
+    self.routes['GET']['/status'] = (req, res) ->
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      ret = {}
+      ret['date'] = new Date()
+      ret['onlines'] = object_length(self.addresslist)
+      res.send(JSON.stringify(ret))
 
     self.routes['POST']['/metadata'] = (req, res) ->
       res.setHeader 'Content-Type', 'text/javascript; charset=utf-8'
