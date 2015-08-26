@@ -277,16 +277,6 @@ class nodeIRC
           danmaku.say message, '127.0.0.1',
             color: '0,255,0,0.9'
           return
-        when 'mute'
-          danmaku.mute = true
-          message = "node-irc muted."
-          self.client.ctcp(nick, 'notice', message)
-          return
-        when 'unmute'
-          danmaku.mute = false
-          message = "node-irc unmuted."
-          self.client.ctcp(nick, 'notice', message)
-          return
         when 'lookup'
           target = param1
           fragdata = danmaku.fragtable[target]
@@ -347,7 +337,6 @@ class Danmaku
     self.history_limit = 50
     self.polliing_timeout = 60000
 
-    self.mute = false
     self.last_response_time = (new Date()).getTime()
     self.metadata = {}
     self.metadata_updated = false
@@ -456,14 +445,30 @@ class Danmaku
             safe_text = "#{safe_text}\u0000"
     safe_text
 
-  query: (last_id, callback) =>
+  findMessage: (id, callback) =>
     self = this
+    query =
+      id: id
+    projection =
+      _id: 0
     self.db.collection(self.dbMessageName).find(
+      query,
+      projection
+    ).limit(1).toArray (err, items) ->
+      throw err if err
+      callback(items)
+
+  findUnreadMessages: (id, callback) =>
+    self = this
+    query =
       id:
-        $gt: last_id
-    ,
+        $gt: id
+    projection =
       ip: 0
       _id: 0
+    self.db.collection(self.dbMessageName).find(
+      query,
+      projection
     ).sort(id: 1).toArray (err, items) ->
       throw err if err
       callback(items)
@@ -478,7 +483,7 @@ class Danmaku
         self.emitter.emit 'onmessage', []
         self.listener_count = 0
       return if self.last_response_id == self.last_record_id
-      self.query self.last_response_id, (items) ->
+      self.findUnreadMessages self.last_response_id, (items) ->
         DEBUG('Return %d rows. (%d listeners)', items.length, self.listener_count)
         self.emitter.emit('onmessage', items)
         self.listener_count = 0
@@ -511,7 +516,7 @@ class Danmaku
     self = this
     self.db.collection(self.dbConfigName).find(
       name: 'blacklist'
-    ).sort(id: 1).toArray (err, items) ->
+    ).limit(1).toArray (err, items) ->
       throw err if err
       return if items.length == 0
       self.blacklist = JSON.parse(items[0].text)
@@ -606,14 +611,13 @@ class Danmaku
       callback() if callback
     self.last_record_id++
 
-    if not self.mute
-      if self.metadata_updated
-        title = self.metadata.title
-        artist = self.metadata.artist
-        tags = self.metadata.tags
-        nodeirc.say("\u000306Now playing: \u000314#{artist} - #{title} (#{tags})")
-        self.metadata_updated = false
-      nodeirc.action("\u000306[#{uid}] \u000314#{text}")
+    if self.metadata_updated
+      title = self.metadata.title
+      artist = self.metadata.artist
+      tags = self.metadata.tags
+      nodeirc.say("\u000306Now playing: \u000314#{artist} - #{title} (#{tags})")
+      self.metadata_updated = false
+    nodeirc.action("\u000306[#{uid}] \u000314#{text}")
 
   system_say: (text, attributes = {}) =>
     self = this
@@ -622,7 +626,7 @@ class Danmaku
     attributes.speed ||= 0.75
     self.say text, '127.0.0.1', attributes
 
-  ban: (uid, by_, reason, duration = 3600) =>
+  ban: (uid, by_, reason, duration = 3600, message = '') =>
     self = this
     now_time = (new Date()).getTime()
     timestamp = if self.blacklist[uid] then self.blacklist[uid].timestamp else now_time
@@ -631,15 +635,14 @@ class Danmaku
       moderator: by_
       timestamp: new_timestamp
     duration_hours = parseInt((new_timestamp - now_time) / 3600 / 1000)
-    if not self.mute
-      nodeirc.action("\u000304#{uid} has been banned #{duration_hours} hours. (#{reason} by #{by_})")
-      self.system_say("#{uid} has been banned #{duration_hours} hours. (#{reason})")
+    nodeirc.action("\u000301,04#{uid} has been banned #{duration_hours} hours. (#{reason} by #{by_})")
+    self.system_say("“#{message}” has been banned #{duration_hours} hours. (#{reason})") if message
     self.saveBlacklist()
 
   unban: (uid, by_) =>
     self = this
     delete self.blacklist[uid] if self.blacklist[uid]
-    nodeirc.action("\u000303#{uid} has been unbanned.") if not self.mute
+    nodeirc.action("\u000303#{uid} has been unbanned.")
     self.saveBlacklist()
 
   createRoutes: =>
@@ -692,7 +695,7 @@ class Danmaku
             ret.code = 500
             ret.status = error
         WARN('%s (%s)', error, ip)
-        if not self.mute && self.last_blacklist_uid != uid
+        if self.last_blacklist_uid != uid
           nodeirc.action("\u000306[#{uid}]\u000301,01 #{text} \u000304(#{error})")
         self.last_blacklist_uid = uid
       res.send(jsonp_stringify(ret, callback))
@@ -714,10 +717,9 @@ class Danmaku
       self.addresslistCheck(ip)
 
       if user_last_id < self.last_record_id
-        self.query user_last_id, (items) ->
+        self.findUnreadMessages user_last_id, (items) ->
           ret.data = items
           res.send(jsonp_stringify(ret, callback))
-          return
       else
         # DEBUG('Hook from %s', ip)
         self.listener_count++
@@ -736,35 +738,37 @@ class Danmaku
       ip = get_client_remote_address(req)
       addresses = get_client_remote_addresses(req)
       uid = get_ip_with_tripcode(ip)
-      target_uid = params.target_uid
+      target_id = parseInt(params.target_id)
       callback = params.callback
 
-      try
-        self.browserCheck(req)
-        self.blacklistCheck(ip)
-        self.fragtableCheck(address) for address in addresses
-        fragdata = self.fragtable[target_uid]
-        target_uid = if fragdata then get_ip_with_tripcode(fragdata.ip) else null
-        throw 'UID Not Found' if not target_uid
-        if self.fragtable[target_uid].flag[uid]
-          nodeirc.action("\u000307#{target_uid} has been reported by #{uid})")
-        else
-          self.fragtable[target_uid].flag[uid] = 1
-          if object_length(self.fragtable[target_uid].flag) >= 2
-            self.ban(target_uid, uid, 'Online Report', 86400)
+      self.findMessage target_id, (items) ->
+        try
+          self.browserCheck(req)
+          self.blacklistCheck(ip)
+          self.fragtableCheck(address) for address in addresses
+          throw 'Message ID Not Found' if items.length == 0
+          item = items[0]
+          target_uid = item.uid
+          target_message = item.text
+          if self.fragtable[target_uid].flag[uid]
+            nodeirc.action("\u000307#{target_uid} has been reported by #{uid})")
           else
-            self.system_say("#{target_uid} is reported by #{uid}", color: '255,128,0,0.9')
-      catch error
-        switch error
-          when 'BLACKLIST'
-            ret['message'] = 'I\'m a teapot'
-          else
-            ret['message'] = error
-        WARN('%s (%s)', error, ip)
-        if not self.mute && self.last_blacklist_uid != uid
-          nodeirc.action("\u000306#{uid}\u000314 is trying to report #{target_uid} \u000304(#{error})")
-        self.last_blacklist_uid = uid
-      res.send(jsonp_stringify(ret, callback))
+            self.fragtable[target_uid].flag[uid] = 1
+            if object_length(self.fragtable[target_uid].flag) >= 2
+              self.ban(target_uid, uid, 'Online Report', 86400, target_message)
+            else
+              self.system_say("“#{target_message}” is reported by #{uid}", color: '255,128,0,0.9')
+        catch error
+          switch error
+            when 'BLACKLIST'
+              ret['message'] = 'I\'m a teapot'
+            else
+              ret['message'] = error
+          WARN('%s (%s)', error, ip)
+          if self.last_blacklist_uid != uid
+            nodeirc.action("\u000306#{uid}\u000314 is trying to report ##{target_id} \u000304(#{error})")
+          self.last_blacklist_uid = uid
+        res.send(jsonp_stringify(ret, callback))
 
     self.routes['GET']['/status'] = (req, res) ->
       res.setHeader('Content-Type', 'application/json; charset=utf-8')
