@@ -631,7 +631,8 @@ class Danmaku
     attributes.color ||= '255,0,0,0.9'
     attributes.size ||= 0.75
     attributes.speed ||= 0.75
-    self.say text, '127.0.0.1', attributes
+    attributes.address ||= '127.0.0.1'
+    self.say text, attributes.address, attributes
 
   ban: (uid, by_, reason, duration = 3600, message = '') =>
     self = this
@@ -757,6 +758,7 @@ class Danmaku
           item = items[0]
           target_uid = item.uid
           target_message = item.text
+          throw 'Target UID Not Found' unless self.fragtable[target_uid]
           if self.fragtable[target_uid].flag[uid]
             nodeirc.action("\u000307#{target_uid} has been reported by #{uid})")
           else
@@ -764,7 +766,11 @@ class Danmaku
             if object_length(self.fragtable[target_uid].flag) >= 2
               self.ban(target_uid, uid, 'Online Report', 86400, target_message)
             else
-              self.system_say("“#{target_message}” is reported by #{uid}", color: '255,128,0,0.9')
+              self.system_say(
+                "“#{target_message}” is reported by #{uid}",
+                color: '255,128,0,0.9',
+                address: ip
+              )
         catch error
           switch error
             when 'BLACKLIST'
