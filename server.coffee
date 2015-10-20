@@ -82,8 +82,15 @@ strip_hyper_links = (text) ->
   text.replace(/http(s?):\/\//g, 'ttp$1://')
 
 get_ip_with_tripcode = (address, masked = false) ->
-  tripcode = crypto.createHash('md5').update(address.toString()).digest('hex').substr(28, 4).toUpperCase()
-  address.toString().replace /\.[0-9]+\.[0-9]+$/, '.' + if masked then '*' else tripcode
+  hashed_address = crypto.createHash('md5').update(address.toString()).digest('hex')
+  ip_with_tripcode = null
+  if address.match(/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/)?
+    tripcode = hashed_address.substr(28, 4).toUpperCase()
+    ip_with_tripcode = address.toString().replace(/\.[0-9]+\.[0-9]+$/, '.' + if masked then '*' else tripcode)
+  else
+    tripcode = hashed_address.substr(24, 8).toLowerCase()
+    ip_with_tripcode = address.toString().replace(/^(\w+\:\w+|\w+|)(?:\:\w*)+$/, '\$1::' + if masked then '*' else tripcode)
+  ip_with_tripcode
 
 get_client_remote_address = (req) ->
   req.header('X-Real-IP') or req.connection.remoteAddress
