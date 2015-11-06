@@ -13,6 +13,8 @@ irc        = require('irc')
 $DEBUG  = not process.env.SHELL
 
 process.env.TZ = 'Asia/Taipei'
+process.stdin.resume()
+process.stdin.setEncoding('utf8')
 
 DEBUG = () ->
   parameters = Array.prototype.slice.call(arguments)
@@ -317,7 +319,7 @@ class nodeIRC
           return
 
     self.client.addListener 'error', (message) ->
-      ERROR(message)
+      console.log(message)
 
   say: (message) =>
     self = this
@@ -326,6 +328,11 @@ class nodeIRC
   action: (message) =>
     self = this
     self.client.action(self.chanName, message)
+
+  send: () =>
+    self = this
+    parameters = Array.prototype.slice.call(arguments)
+    self.client.send.apply(self.client, parameters)
 
 class Danmaku
   constructor: ->
@@ -844,3 +851,7 @@ danmaku = new Danmaku()
 nodeirc = new nodeIRC()
 danmaku.initialize()
 danmaku.connectDb(danmaku.start)
+
+process.stdin.on 'data', (chunk) ->
+  text = chunk.strip()
+  nodeirc.send.apply(this, text.split(/\0+/))
