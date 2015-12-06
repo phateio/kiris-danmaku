@@ -599,6 +599,7 @@ class Danmaku
 
   say: (text, address, attributes = {}, callback = false) =>
     self = this
+    id = self.last_record_id + 1
     uid = get_ip_with_tripcode(address)
     timestamp = (new Date()).getTime()
 
@@ -609,7 +610,7 @@ class Danmaku
     speed = attributes.speed || 1.0
 
     item =
-      id: self.last_record_id + 1
+      id: id
       text: text
       top: top
       color: color.split(',')
@@ -631,7 +632,7 @@ class Danmaku
       tags = self.metadata.tags
       nodeirc.say("\u000306Now playing: \u000314#{artist} - #{title} (#{tags})")
       self.metadata_updated = false
-    nodeirc.action("\u000306[#{uid}] \u000314#{text}")
+    nodeirc.action("\u000306~#{uid} \u000310##{id} \u000314#{text}")
 
   system_say: (text, attributes = {}) =>
     self = this
@@ -639,7 +640,7 @@ class Danmaku
     attributes.size ||= 0.75
     attributes.speed ||= 0.75
     attributes.address ||= '127.0.0.1'
-    self.say text, attributes.address, attributes
+    self.say(text, attributes.address, attributes)
 
   ban: (uid, by_, reason, duration = 3600, message = '') =>
     self = this
@@ -650,14 +651,14 @@ class Danmaku
       moderator: by_
       timestamp: new_timestamp
     duration_hours = parseInt((new_timestamp - now_time) / 3600 / 1000)
-    nodeirc.action("\u000301,04#{uid} has been banned #{duration_hours} hours. (#{reason} by #{by_})")
     self.system_say("“#{message}” has been banned #{duration_hours} hours. (#{reason})") if message
+    nodeirc.action("\u000301,04#{uid} has been banned #{duration_hours} hours. (#{reason} by #{by_})")
     self.saveBlacklist()
 
   unban: (uid, by_) =>
     self = this
     delete self.blacklist[uid] if self.blacklist[uid]
-    nodeirc.action("\u000303#{uid} has been unbanned.")
+    nodeirc.action("\u000301,03#{uid} has been unbanned.")
     self.saveBlacklist()
 
   createRoutes: =>
@@ -711,7 +712,7 @@ class Danmaku
             ret.status = error
         WARN('%s (%s)', error, ip)
         if self.last_blacklist_uid != uid
-          nodeirc.action("\u000306[#{uid}]\u000301,01 #{text} \u000304(#{error})")
+          nodeirc.action("\u000306~#{uid} \u000310#BAKA \u000301,01 #{text} \u000304(#{error})")
         self.last_blacklist_uid = uid
       res.send(jsonp_stringify(ret, callback))
 
@@ -767,17 +768,17 @@ class Danmaku
           target_message = item.text
           throw 'Target UID Not Found' unless self.fragtable[target_uid]
           if self.fragtable[target_uid].flag[uid]
-            nodeirc.action("\u000307#{target_uid} has been reported by #{uid})")
+            nodeirc.action("\u000307#{target_uid} has been reported by #{uid} (duplicated)")
           else
             self.fragtable[target_uid].flag[uid] = 1
             if object_length(self.fragtable[target_uid].flag) >= 2
-              self.ban(target_uid, uid, 'Online Report', 86400, target_message)
+              self.ban(target_uid, uid, "Online Report by #{uid}", 86400, target_message)
             else
               self.system_say(
-                "“#{target_message}” is reported by #{uid}",
-                color: '255,128,0,0.9',
-                address: ip
+                "“#{target_message}” has been reported (Online Report by #{uid})",
+                color: '255,128,0,0.9'
               )
+              nodeirc.action("\u000301,07“#{target_message}” has been reported by #{uid}")
         catch error
           switch error
             when 'BLACKLIST'
