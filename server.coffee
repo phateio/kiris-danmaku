@@ -652,7 +652,7 @@ class Danmaku
       timestamp: new_timestamp
     duration_hours = parseInt((new_timestamp - now_time) / 3600 / 1000)
     self.system_say("“#{message}” has been banned #{duration_hours} hours. (#{reason})") if message
-    nodeirc.action("\u000301,04#{uid} has been banned #{duration_hours} hours. (#{reason} by #{by_})")
+    nodeirc.action("\u000301,04#{uid} has been banned #{duration_hours} hours. (#{reason})")
     self.saveBlacklist()
 
   unban: (uid, by_) =>
