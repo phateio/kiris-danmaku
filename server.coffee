@@ -726,9 +726,10 @@ class Danmaku
       params = url.parse(req.url, true).query
       timestamp = (new Date()).getTime()
       ip = get_client_remote_address(req)
-      user_last_id = parseInt(params.last_id) || parseInt(params.lastid) # Deprecated
+      user_last_id = parseInt(params.last_id)
       callback = params.callback
-      if not (user_last_id && user_last_id >= self.last_record_id - self.history_limit && user_last_id <= self.last_record_id)
+      unless user_last_id && user_last_id >= self.last_record_id - self.history_limit \
+      && user_last_id <= self.last_record_id
         user_last_id = self.last_record_id
       self.addresslistCheck(ip)
 
@@ -740,9 +741,7 @@ class Danmaku
         # DEBUG('Hook from %s', ip)
         self.listener_count++
         self.emitter.once 'onmessage', (items) ->
-          ret.data = []
-          for item in items
-            ret.data.push(item) if item.id > user_last_id
+          ret.data = items
           res.send(jsonp_stringify(ret, callback))
 
     self.routes['GET']['/report'] = (req, res) ->
