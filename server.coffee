@@ -624,7 +624,7 @@ class Danmaku
     self.db.collection(self.dbMessageName).insert item, (result) ->
       DEBUG('Insert id %d (%s)', self.last_record_id, address)
       callback() if callback
-    self.last_record_id++
+      self.last_record_id++
 
     if self.metadata_updated
       title = self.metadata.title
